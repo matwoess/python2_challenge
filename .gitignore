@@ -1,3 +1,6 @@
+.idea
+
 /venv/
 /data/
+/results/
 dataset.pkl
