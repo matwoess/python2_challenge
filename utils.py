@@ -30,7 +30,7 @@ def plot(inputs, targets, predictions, path, update):
     os.makedirs(path, exist_ok=True)
     fig, ax = plt.subplots(2, 2)
     ax[1, 1].remove()
-    
+
     for i in range(len(inputs)):
         ax[0, 0].clear()
         ax[0, 0].set_title('input')

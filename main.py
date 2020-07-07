@@ -1,24 +1,8 @@
 # -*- coding: utf-8 -*-
-"""example_project/main.py
+"""main.py
 
-Author -- Michael Widrich
-Contact -- widrich@ml.jku.at
-Date -- 01.02.2020
-
-###############################################################################
-
-The following copyright statement applies to all code within this file.
-
-Copyright statement:
-This material, no matter whether in printed or electronic form, may be used for
-personal and non-commercial educational use only. Any reproduction of this
-manuscript, no matter whether as a whole or in parts, no matter whether in
-printed or in electronic form, requires explicit prior acceptance of the
-authors.
-
-###############################################################################
-
-Main file of example project.
+Author -- Mathias Wöß
+Contact -- k11709064@students.jku.at
 """
 
 import os
@@ -48,12 +32,12 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
             inputs, targets, file_names = data
             inputs = inputs.to(device)
             targets = targets.to(device)
-            
+
             # Get outputs for network
             outputs = model(inputs)
-            
+
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
-            
+
             # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
             loss += (torch.stack([mse(output, target) for output, target in zip(outputs, targets)]).sum()
                      / len(dataloader.dataset))
@@ -66,16 +50,16 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     # Prepare a path to plot to
     plotpath = os.path.join(results_path, 'plots')
     os.makedirs(plotpath, exist_ok=True)
-    
+
     # Load or download CIFAR10 dataset
     greyscale_dataset = GreyscaleDataset(data_folder='data')
-    
+
     # Split dataset into training, validation, and test set randomly
-    trainingset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(3/5))))
-    validationset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(3/5)),
-                                                                               int(len(greyscale_dataset)*(4/5))))
-    testset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(4/5)),
-                                                                         len(greyscale_dataset)))
+    trainingset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (3 / 5))))
+    validationset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (3 / 5)),
+                                                                                 int(len(greyscale_dataset) * (4 / 5))))
+    testset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (4 / 5)),
+                                                                           len(greyscale_dataset)))
 
     # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
     trainingset_eval = CroppedImages(dataset=trainingset)
@@ -84,27 +68,26 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=1, shuffle=False, num_workers=0)
     valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False, num_workers=0)
     testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=0)
-    
+
     # Create datasets and dataloaders with rotated targets with augmentation (for training)
-    trainingset_augmented = CroppedImages(dataset=trainingset,
-                                          transform_chain=transforms.Compose([transforms.RandomHorizontalFlip(),
-                                                                              transforms.RandomVerticalFlip()]))
+    chain = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
+    trainingset_augmented = CroppedImages(dataset=trainingset, transform_chain=chain)
     trainloader_augmented = torch.utils.data.DataLoader(trainingset_augmented, batch_size=16, shuffle=True,
                                                         num_workers=0)
-    
+
     # Define a tensorboard summary writer that writes to directory "results_path/tensorboard"
     writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard'))
-    
+
     # Create Network
     net = SimpleCNN(**network_config)
     net.to(device)
-    
+
     # Get mse loss function
     mse = torch.nn.MSELoss()
-    
+
     # Get adam optimizer
     optimizer = torch.optim.Adam(net.parameters(), lr=learningrate, weight_decay=weight_decay)
-    
+
     print_stats_at = 1e2  # print status to tensorboard every x updates
     plot_at = 1e4  # plot every x updates
     validate_at = 5e3  # evaluate model on validation set and check for new best model every x updates
@@ -114,7 +97,7 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
 
     # Save initial model as "best" model (will be overwritten later)
     torch.save(net, os.path.join(results_path, 'best_model.pt'))
-    
+
     # Train until n_updates update have been reached
     while update < n_updates:
         for data in trainloader_augmented:
@@ -122,50 +105,45 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
             inputs, targets, ids = data
             inputs = inputs.to(device)
             targets = targets.to(device)
-            
+
             # Reset gradients
             optimizer.zero_grad()
-            
+
             # Get outputs for network
             outputs = net(inputs)
-            
+
             # Calculate loss, do backward pass, and update weights
             loss = mse(outputs, targets)
             loss.backward()
             optimizer.step()
-            
+
             # Print current status and score
             if update % print_stats_at == 0 and update > 0:
-                writer.add_scalar(tag="training/loss",
-                                  scalar_value=loss.cpu(),
-                                  global_step=update)
-            
+                writer.add_scalar(tag="training/loss", scalar_value=loss.cpu(), global_step=update)
+
             # Plot output
             if update % plot_at == 0:
                 plot(inputs.detach().cpu().numpy(), targets.detach().cpu().numpy(), outputs.detach().cpu().numpy(),
                      plotpath, update)
-            
+
             # Evaluate model on validation set
             if update % validate_at == 0 and update > 0:
                 val_loss = evaluate_model(net, dataloader=valloader, device=device)
                 writer.add_scalar(tag="validation/loss", scalar_value=val_loss.cpu(), global_step=update)
                 # Add weights as arrays to tensorboard
                 for i, param in enumerate(net.parameters()):
-                    writer.add_histogram(tag=f'validation/param_{i}', values=param.cpu(),
-                                         global_step=update)
+                    writer.add_histogram(tag=f'validation/param_{i}', values=param.cpu(), global_step=update)
                 # Add gradients as arrays to tensorboard
                 for i, param in enumerate(net.parameters()):
-                    writer.add_histogram(tag=f'validation/gradients_{i}',
-                                         values=param.grad.cpu(),
-                                         global_step=update)
+                    writer.add_histogram(tag=f'validation/gradients_{i}', values=param.grad.cpu(), global_step=update)
                 # Save best model for early stopping
                 if best_validation_loss > val_loss:
                     best_validation_loss = val_loss
                     torch.save(net, os.path.join(results_path, 'best_model.pt'))
-            
+
             update_progess_bar.set_description(f"loss: {loss:7.5f}", refresh=True)
             update_progess_bar.update()
-            
+
             # Increment update counter, exit if maximum number of updates is reached
             update += 1
             if update >= n_updates:
@@ -173,19 +151,19 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
 
     update_progess_bar.close()
     print('Finished Training!')
-    
+
     # Load best model and compute score on test set
     print(f"Computing scores for best model")
     net = torch.load(os.path.join(results_path, 'best_model.pt'))
     test_loss = evaluate_model(net, dataloader=testloader, device=device)
     val_loss = evaluate_model(net, dataloader=valloader, device=device)
     train_loss = evaluate_model(net, dataloader=trainloader, device=device)
-    
+
     print(f"Scores:")
     print(f"test loss: {test_loss}")
     print(f"validation loss: {val_loss}")
     print(f"training loss: {train_loss}")
-    
+
     # Write result to file
     with open(os.path.join(results_path, 'results.txt'), 'w') as fh:
         print(f"Scores:", file=fh)
@@ -197,12 +175,12 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
 if __name__ == '__main__':
     import argparse
     import json
-    
+
     parser = argparse.ArgumentParser()
     parser.add_argument('config_file', help='path to config file', type=str)
     args = parser.parse_args()
     config_file = args.config_file
-    
+
     with open(config_file, 'r') as fh:
         config = json.load(fh)
     main(**config)
