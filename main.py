@@ -25,10 +25,12 @@ import os
 import numpy as np
 import torch
 import torch.utils.data
-from datasets import CIFAR10, RotatedImages
+from datasets import GreyscaleDataset, CroppedImages
 from utils import plot
 from architectures import SimpleCNN
 import torchvision.transforms as transforms
+# TODO: requirements.txt
+import tensorboard
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 
@@ -66,27 +68,27 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     os.makedirs(plotpath, exist_ok=True)
     
     # Load or download CIFAR10 dataset
-    cifar10_dataset = CIFAR10(data_folder='cifar10')
+    greyscale_dataset = GreyscaleDataset(data_folder='data')
     
     # Split dataset into training, validation, and test set randomly
-    trainingset = torch.utils.data.Subset(cifar10_dataset, indices=np.arange(int(len(cifar10_dataset)*(3/5))))
-    validationset = torch.utils.data.Subset(cifar10_dataset, indices=np.arange(int(len(cifar10_dataset)*(3/5)),
-                                                                               int(len(cifar10_dataset)*(4/5))))
-    testset = torch.utils.data.Subset(cifar10_dataset, indices=np.arange(int(len(cifar10_dataset)*(4/5)),
-                                                                         len(cifar10_dataset)))
+    trainingset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(3/5))))
+    validationset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(3/5)),
+                                                                               int(len(greyscale_dataset)*(4/5))))
+    testset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset)*(4/5)),
+                                                                         len(greyscale_dataset)))
 
     # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
-    trainingset_eval = RotatedImages(dataset=trainingset, rotation_angle=45.)
-    validationset = RotatedImages(dataset=validationset, rotation_angle=45.)
-    testset = RotatedImages(dataset=testset, rotation_angle=45.)
+    trainingset_eval = CroppedImages(dataset=trainingset)
+    validationset = CroppedImages(dataset=validationset)
+    testset = CroppedImages(dataset=testset)
     trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=1, shuffle=False, num_workers=0)
     valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False, num_workers=0)
     testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=0)
     
     # Create datasets and dataloaders with rotated targets with augmentation (for training)
-    trainingset_augmented = RotatedImages(dataset=trainingset, rotation_angle=45.,
+    trainingset_augmented = CroppedImages(dataset=trainingset,
                                           transform_chain=transforms.Compose([transforms.RandomHorizontalFlip(),
-                                                                            transforms.RandomVerticalFlip()]))
+                                                                              transforms.RandomVerticalFlip()]))
     trainloader_augmented = torch.utils.data.DataLoader(trainingset_augmented, batch_size=16, shuffle=True,
                                                         num_workers=0)
     
