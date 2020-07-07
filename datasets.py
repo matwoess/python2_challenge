@@ -20,12 +20,12 @@ from tqdm import tqdm
 
 def get_random_image_values():
     border = 20
-    rand_x = random.randint(70, 100)
-    rand_y = random.randint(70, 100)
+    rand_x = random.randrange(70, 100)  # maximum pixel index = 99
+    rand_y = random.randrange(70, 100)  # maximum pixel index = 99
     rand_w = random.randrange(5, 21 + 1, 2)
     rand_h = random.randrange(5, 21 + 1, 2)
-    rand_cx = random.randrange(border + rand_w // 2, rand_x - border - rand_w // 2 + 1, 2)
-    rand_cy = random.randrange(border + rand_h // 2, rand_y - border - rand_h // 2 + 1, 2)
+    rand_cx = random.randrange(border + (rand_w // 2), rand_x - border - (rand_w // 2), 2)
+    rand_cy = random.randrange(border + (rand_h // 2), rand_y - border - (rand_h // 2), 2)
     return rand_x, rand_y, rand_w, rand_h, rand_cx, rand_cy
 
 
@@ -45,7 +45,7 @@ class GreyscaleDataset(Dataset):
             for image in tqdm(files, desc='creating dataset', total=len(files)):
                 img = Image.open(image)
                 x, y, w, h, cx, cy = get_random_image_values()
-                img = img.resize((x, y), Image.LANCZOS)
+                img = img.resize((y, x), Image.LANCZOS)  # mind thee: x and y swapped
                 arr = np.array(img, dtype=np.float32)
                 images.append(arr)
                 crop_sizes.append((w, h))
@@ -114,7 +114,7 @@ class CroppedImages(Dataset):
         # image_data = TF.resized_crop(image_data, i=8, j=8, h=16, w=16, size=32)
         # rotated_image_data = TF.resized_crop(rotated_image_data, i=8, j=8, h=16, w=16, size=32)
         # # Convert to float32
-        image_data = np.asarray(image_data, dtype=np.float32)
+        image_data = np.copy(np.asarray(image_data, dtype=np.float32))
         # rotated_image_data = np.asarray(rotated_image_data, dtype=np.float32)
         # Perform normalization based on input values of individual sample
         mean = image_data.mean()
