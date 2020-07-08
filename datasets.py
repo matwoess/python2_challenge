@@ -14,7 +14,7 @@ import dill as pickle
 from torch.utils.data import Dataset
 import torchvision
 import torchvision.transforms as transforms
-import torchvision.transforms.functional as tf
+import torchvision.transforms.functional as TF
 from tqdm import tqdm
 
 
@@ -66,14 +66,15 @@ class GreyscaleDataset(Dataset):
         return self.images[idx], self.crop_sizes[idx], self.crop_centers[idx], idx
 
 
-def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: tuple) -> tuple:
+def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: tuple, debug=False) -> tuple:
     # check parameters
-    if not isinstance(image_array, np.ndarray) or len(image_array.shape) != 2:
-        raise ValueError('image_array is not a 2D numpy array')
-    elif len(crop_size) != 2 or len(crop_center) != 2:
-        raise ValueError('crop size or crop center tuples have invalid amount of values')
-    elif crop_size[0] % 2 == 0 or crop_size[1] % 2 == 0:
-        raise ValueError('crop size contains an even number')
+    if debug:
+        if not isinstance(image_array, np.ndarray) or len(image_array.shape) != 2:
+            raise ValueError('image_array is not a 2D numpy array')
+        elif len(crop_size) != 2 or len(crop_center) != 2:
+            raise ValueError('crop size or crop center tuples have invalid amount of values')
+        elif crop_size[0] % 2 == 0 or crop_size[1] % 2 == 0:
+            raise ValueError('crop size contains an even number')
     # check rectangle position
     crop_margin = 20
     min_x = crop_center[0] - crop_size[0] // 2
@@ -87,25 +88,25 @@ def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: 
     crop_array = np.zeros_like(image_array)
     crop_array[min_x:max_x + 1, min_y:max_y + 1] = 1
     # target_array = crop region in image_array
-    target_array = np.copy(image_array[min_x:max_x + 1, min_y:max_y + 1])
+    target_array = np.copy(image_array)  # [min_x:max_x + 1, min_y:max_y + 1]
     # set image_array values in crop region to 0 (in-place)
     image_array[min_x:max_x + 1, min_y:max_y + 1] = 0
     return image_array, crop_array, target_array
 
 
 class CroppedImages(Dataset):
-    def __init__(self, dataset: Dataset, transform_chain: transforms.Compose = None):
+    def __init__(self, dataset: Dataset, transform_chain: transforms.Compose = None, debug=False):
         """Provides images from 'dataset' as inputs and images cropped as targets"""
         self.dataset = dataset
         self.transform_chain = transform_chain
+        self.debug = debug
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
         image_data, crop_size, crop_center, idx = self.dataset.__getitem__(idx)
-        image_data, crop_array, target_array = create_cropped_data(np.copy(image_data), crop_size, crop_center)
-        image_data = torchvision.transforms.functional.to_pil_image(image_data)
+        image_data = TF.to_pil_image(image_data)
         if self.transform_chain is not None:
             image_data = self.transform_chain(image_data)
         # Create rotated target
@@ -115,6 +116,8 @@ class CroppedImages(Dataset):
         # rotated_image_data = TF.resized_crop(rotated_image_data, i=8, j=8, h=16, w=16, size=32)
         # # Convert to float32
         image_data = np.copy(np.asarray(image_data, dtype=np.float32))
+        image_data, crop_array, target_array = create_cropped_data(np.copy(image_data), crop_size, crop_center,
+                                                                   debug=self.debug)
         # rotated_image_data = np.asarray(rotated_image_data, dtype=np.float32)
         # Perform normalization based on input values of individual sample
         mean = image_data.mean()
@@ -127,10 +130,12 @@ class CroppedImages(Dataset):
         # full_inputs = image_data  # Not feeding information about the position in the image would be bad for our CNN
         full_inputs = np.zeros(shape=(*image_data.shape, 2), dtype=image_data.dtype)
         full_inputs[..., 0] = image_data
+        # TODO: distance to crop_center layer
+        # full_inputs[..., 1] = full_inputs[np.arange(full_inputs.shape[0]), :, 1] = np.linspace(start=-1, stop=1, num=full_inputs.shape[1])
         full_inputs[..., 1] = crop_array
 
         # Convert numpy arrays to tensors
-        full_inputs = tf.to_tensor(full_inputs)
-        target_data = tf.to_tensor(target_array)
+        full_inputs = TF.to_tensor(full_inputs)
+        target_data = TF.to_tensor(target_array)
 
         return full_inputs, target_data, idx

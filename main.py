@@ -44,8 +44,32 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
     return loss
 
 
+def padding_collate_fn(batch_as_list: list):
+    target_size = 100
+    inputs = []
+    targets = []
+    ids = []
+    for input_tensor, target_tensor, idx in batch_as_list:
+        pad_x_left = (target_size - input_tensor[0].shape[0]) // 2
+        pad_x_right = target_size - input_tensor[0].shape[0] - pad_x_left
+        pad_y_bottom = (target_size - input_tensor[0].shape[1]) // 2
+        pad_y_top = target_size - input_tensor[0].shape[1] - pad_y_bottom
+        new_input = torch.nn.functional.pad(input_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
+                                            mode='constant', value=0)
+        new_targets = torch.nn.functional.pad(target_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
+                                              mode='constant', value=0)
+        inputs.append(new_input)
+        targets.append(new_targets)
+        ids.append(torch.tensor(idx, dtype=torch.int32))
+
+    inputs = torch.stack(inputs, dim=0)
+    targets = torch.stack(targets, dim=0)
+    ids = torch.stack(ids, dim=0)
+    return inputs, targets, ids
+
+
 def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_decay: float = 1e-5,
-         n_updates: int = int(1e5), device: torch.device = torch.device("cuda:0")):
+         n_updates: int = int(1e5), device: torch.device = torch.device("cuda:0"), debug=False):
     """Main function that takes hyperparameters and performs training and evaluation of model"""
     # Prepare a path to plot to
     plotpath = os.path.join(results_path, 'plots')
@@ -62,18 +86,21 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
                                                                            len(greyscale_dataset)))
 
     # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
-    trainingset_eval = CroppedImages(dataset=trainingset)
-    validationset = CroppedImages(dataset=validationset)
-    testset = CroppedImages(dataset=testset)
-    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=1, shuffle=False, num_workers=0)
-    valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False, num_workers=0)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=0)
+    trainingset_eval = CroppedImages(dataset=trainingset, debug=debug)
+    validationset = CroppedImages(dataset=validationset, debug=debug)
+    testset = CroppedImages(dataset=testset, debug=debug)
+    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=1, shuffle=False, num_workers=0,
+                                              collate_fn=padding_collate_fn)
+    valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False, num_workers=0,
+                                            collate_fn=padding_collate_fn)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=0,
+                                             collate_fn=padding_collate_fn)
 
     # Create datasets and dataloaders with rotated targets with augmentation (for training)
     chain = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
     trainingset_augmented = CroppedImages(dataset=trainingset, transform_chain=chain)
     trainloader_augmented = torch.utils.data.DataLoader(trainingset_augmented, batch_size=16, shuffle=True,
-                                                        num_workers=0)
+                                                        num_workers=0, collate_fn=padding_collate_fn)
 
     # Define a tensorboard summary writer that writes to directory "results_path/tensorboard"
     writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard'))
@@ -88,9 +115,9 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     # Get adam optimizer
     optimizer = torch.optim.Adam(net.parameters(), lr=learningrate, weight_decay=weight_decay)
 
-    print_stats_at = 1e2  # print status to tensorboard every x updates
-    plot_at = 1e4  # plot every x updates
-    validate_at = 5e3  # evaluate model on validation set and check for new best model every x updates
+    print_stats_at = 1e1 if debug else 1e2  # print status to tensorboard every x updates
+    plot_at = 1e3 if debug else 1e4  # plot every x updates
+    validate_at = 1e2 if debug else 5e3  # evaluate model on validation set and check for new best model every x updates
     update = 0  # current update counter
     best_validation_loss = np.inf  # best validation loss so far
     update_progess_bar = tqdm.tqdm(total=n_updates, desc=f"loss: {np.nan:7.5f}", position=0)  # progressbar
