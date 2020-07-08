@@ -36,6 +36,7 @@ class GreyscaleDataset(Dataset):
         if os.path.exists(dataset_file):
             with open(dataset_file, 'rb') as f:
                 data = pickle.load(f)
+            print(f'loaded dataset from {dataset_file}')
         else:
             # create the data
             files = sorted(glob.glob(os.path.join(data_folder, '**/*.jpg'), recursive=True))
@@ -54,6 +55,7 @@ class GreyscaleDataset(Dataset):
             # safe for next iteration
             with open(dataset_file, 'wb') as f:
                 pickle.dump(data, f)
+            print(f'created datset and saved it to {dataset_file}')
 
         self.images = data['images']
         self.crop_sizes = data['crop_sizes']
@@ -88,7 +90,7 @@ def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: 
     crop_array = np.zeros_like(image_array)
     crop_array[min_x:max_x + 1, min_y:max_y + 1] = 1
     # target_array = crop region in image_array
-    target_array = np.copy(image_array)  # [min_x:max_x + 1, min_y:max_y + 1]
+    target_array = np.copy(image_array[min_x:max_x + 1, min_y:max_y + 1])
     # set image_array values in crop region to 0 (in-place)
     image_array[min_x:max_x + 1, min_y:max_y + 1] = 0
     return image_array, crop_array, target_array
@@ -136,6 +138,6 @@ class CroppedImages(Dataset):
 
         # Convert numpy arrays to tensors
         full_inputs = TF.to_tensor(full_inputs)
-        target_data = TF.to_tensor(target_array)
+        # target_data = TF.to_tensor(target_array)
 
-        return full_inputs, target_data, idx
+        return full_inputs, target_array, idx

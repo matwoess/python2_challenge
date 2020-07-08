@@ -11,7 +11,7 @@ import torch
 import torch.utils.data
 from datasets import GreyscaleDataset, CroppedImages
 from utils import plot
-from architectures import SimpleCNN
+from architectures import DeCropCNN
 import torchvision.transforms as transforms
 # TODO: requirements.txt
 import tensorboard
@@ -31,15 +31,16 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
             # Get a sample and move inputs and targets to device
             inputs, targets, file_names = data
             inputs = inputs.to(device)
-            targets = targets.to(device)
+            # targets = targets.to(device)
 
             # Get outputs for network
-            outputs = model(inputs)
+            predictions = model(inputs)
 
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
 
             # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
-            loss += (torch.stack([mse(output, target) for output, target in zip(outputs, targets)]).sum()
+            loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
+                                  for output, target in zip(predictions, targets)]).mean()
                      / len(dataloader.dataset))
     return loss
 
@@ -49,22 +50,22 @@ def padding_collate_fn(batch_as_list: list):
     inputs = []
     targets = []
     ids = []
-    for input_tensor, target_tensor, idx in batch_as_list:
+    for input_tensor, target_aray, idx in batch_as_list:
         pad_x_left = (target_size - input_tensor[0].shape[0]) // 2
         pad_x_right = target_size - input_tensor[0].shape[0] - pad_x_left
         pad_y_bottom = (target_size - input_tensor[0].shape[1]) // 2
         pad_y_top = target_size - input_tensor[0].shape[1] - pad_y_bottom
         new_input = torch.nn.functional.pad(input_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
                                             mode='constant', value=0)
-        new_targets = torch.nn.functional.pad(target_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
-                                              mode='constant', value=0)
+        # new_targets = torch.nn.functional.pad(target_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
+        #                                       mode='constant', value=0)
         inputs.append(new_input)
-        targets.append(new_targets)
+        targets.append(target_aray)
         ids.append(torch.tensor(idx, dtype=torch.int32))
 
     inputs = torch.stack(inputs, dim=0)
-    targets = torch.stack(targets, dim=0)
-    ids = torch.stack(ids, dim=0)
+    # targets = torch.stack(targets, dim=0)
+    # ids = torch.stack(ids, dim=0)
     return inputs, targets, ids
 
 
@@ -106,7 +107,7 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard'))
 
     # Create Network
-    net = SimpleCNN(**network_config)
+    net = DeCropCNN(**network_config)
     net.to(device)
 
     # Get mse loss function
@@ -117,7 +118,7 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
 
     print_stats_at = 1e1 if debug else 1e2  # print status to tensorboard every x updates
     plot_at = 1e3 if debug else 1e4  # plot every x updates
-    validate_at = 1e2 if debug else 5e3  # evaluate model on validation set and check for new best model every x updates
+    validate_at = 5e1 if debug else 5e3  # evaluate model on validation set and check for new best model every x updates
     update = 0  # current update counter
     best_validation_loss = np.inf  # best validation loss so far
     update_progess_bar = tqdm.tqdm(total=n_updates, desc=f"loss: {np.nan:7.5f}", position=0)  # progressbar
@@ -131,16 +132,19 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
             # Get next samples in `trainloader_augmented`
             inputs, targets, ids = data
             inputs = inputs.to(device)
-            targets = targets.to(device)
-
+            # crop_arrays = inputs[:, 1, ...]
+            # target_masks = crop_arrays.to(dtype=torch.bool)
             # Reset gradients
             optimizer.zero_grad()
 
             # Get outputs for network
-            outputs = net(inputs)
+            predictions = net(inputs)
 
             # Calculate loss, do backward pass, and update weights
-            loss = mse(outputs, targets)
+            # loss = mse(outputs, targets)
+            loss = torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
+                                for output, target in zip(predictions, targets)])
+            loss = loss.mean()
             loss.backward()
             optimizer.step()
 
@@ -150,8 +154,7 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
 
             # Plot output
             if update % plot_at == 0:
-                plot(inputs.detach().cpu().numpy(), targets.detach().cpu().numpy(), outputs.detach().cpu().numpy(),
-                     plotpath, update)
+                plot(inputs.detach().cpu().numpy(), targets, predictions, plotpath, update)
 
             # Evaluate model on validation set
             if update % validate_at == 0 and update > 0:

@@ -1,24 +1,8 @@
 # -*- coding: utf-8 -*-
-"""example_project/utils.py
+"""utils.py
 
-Author -- Michael Widrich
-Contact -- widrich@ml.jku.at
-Date -- 01.02.2020
-
-###############################################################################
-
-The following copyright statement applies to all code within this file.
-
-Copyright statement:
-This material, no matter whether in printed or electronic form, may be used for
-personal and non-commercial educational use only. Any reproduction of this
-manuscript, no matter whether as a whole or in parts, no matter whether in
-printed or in electronic form, requires explicit prior acceptance of the
-authors.
-
-###############################################################################
-
-Utils file of example project.
+Author -- Mathias Wöß
+Contact -- k11709064@students.jku.at
 """
 
 import os
@@ -38,11 +22,14 @@ def plot(inputs, targets, predictions, path, update):
         ax[0, 0].set_axis_off()
         ax[0, 1].clear()
         ax[0, 1].set_title('targets')
-        ax[0, 1].imshow(targets[i, 0], cmap=plt.cm.gray, interpolation='none')
+        ax[0, 1].imshow(targets[i], cmap=plt.cm.gray, interpolation='none')
         ax[0, 1].set_axis_off()
         ax[1, 0].clear()
         ax[1, 0].set_title('predictions')
-        ax[1, 0].imshow(predictions[i, 0], cmap=plt.cm.gray, interpolation='none')
+        pred_img = predictions[i]
+        pred_img = pred_img.detach().cpu().numpy()
+        pred_img = pred_img.reshape(targets[i].shape[0], targets[i].shape[1])
+        ax[1, 0].imshow(pred_img, cmap=plt.cm.gray, interpolation='none')
         ax[1, 0].set_axis_off()
         fig.tight_layout()
         fig.savefig(os.path.join(path, f"{update:07d}_{i:02d}.png"), dpi=1000)
