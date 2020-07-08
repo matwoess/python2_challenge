@@ -40,7 +40,7 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
 
             # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
             loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
-                                  for output, target in zip(predictions, targets)]).mean()
+                                  for output, target in zip(predictions, targets)]).sum()
                      / len(dataloader.dataset))
     return loss
 
@@ -76,7 +76,7 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     plotpath = os.path.join(results_path, 'plots')
     os.makedirs(plotpath, exist_ok=True)
 
-    # Load or download CIFAR10 dataset
+    # Load or create the dataset
     greyscale_dataset = GreyscaleDataset(data_folder='data')
 
     # Split dataset into training, validation, and test set randomly

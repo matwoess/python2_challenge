@@ -111,16 +111,9 @@ class CroppedImages(Dataset):
         image_data = TF.to_pil_image(image_data)
         if self.transform_chain is not None:
             image_data = self.transform_chain(image_data)
-        # Create rotated target
-        # rotated_image_data = TF.rotate(image_data, angle=self.rotation_angle, resample=PIL.Image.BILINEAR)
-        # # Crop and resize to get rid of unknown image parts
-        # image_data = TF.resized_crop(image_data, i=8, j=8, h=16, w=16, size=32)
-        # rotated_image_data = TF.resized_crop(rotated_image_data, i=8, j=8, h=16, w=16, size=32)
-        # # Convert to float32
         image_data = np.copy(np.asarray(image_data, dtype=np.float32))
-        image_data, crop_array, target_array = create_cropped_data(np.copy(image_data), crop_size, crop_center,
-                                                                   debug=self.debug)
-        # rotated_image_data = np.asarray(rotated_image_data, dtype=np.float32)
+        image_data, crop_array, target_array = create_cropped_data(
+            np.copy(image_data), crop_size, crop_center, debug=self.debug)
         # Perform normalization based on input values of individual sample
         mean = image_data.mean()
         std = image_data.std()
@@ -130,11 +123,21 @@ class CroppedImages(Dataset):
         target_array[:] /= std
         # Add information about relative position in image to inputs
         # full_inputs = image_data  # Not feeding information about the position in the image would be bad for our CNN
-        full_inputs = np.zeros(shape=(*image_data.shape, 2), dtype=image_data.dtype)
+        full_inputs = np.zeros(shape=(*image_data.shape, 3), dtype=image_data.dtype)
         full_inputs[..., 0] = image_data
-        # TODO: distance to crop_center layer
-        # full_inputs[..., 1] = full_inputs[np.arange(full_inputs.shape[0]), :, 1] = np.linspace(start=-1, stop=1, num=full_inputs.shape[1])
-        full_inputs[..., 1] = crop_array
+        # create a layer showing approximately how far away from the crop_center each pixel is
+        x_offset = (crop_center[0] - image_data.shape[0] / 2) / image_data.shape[0]
+        y_offset = (crop_center[1] - image_data.shape[1] / 2) / image_data.shape[1]
+        closeness_array = np.zeros(image_data.shape, dtype=np.float32)
+        closeness_array.T[:, ] += 0.5 - np.abs(
+            np.linspace(-0.5 - x_offset, 0.5 - x_offset, num=image_data.shape[0], endpoint=True))
+        closeness_array[:, ] += 0.5 - np.abs(
+            np.linspace(-0.5 - y_offset, 0.5 - y_offset, num=image_data.shape[1], endpoint=True))
+        # scale layer to interval  [0, 1]
+        closeness_array -= np.min(closeness_array)
+        closeness_array /= np.max(closeness_array)
+        full_inputs[..., 1] = closeness_array
+        full_inputs[..., 2] = crop_array
 
         # Convert numpy arrays to tensors
         full_inputs = TF.to_tensor(full_inputs)

@@ -6,9 +6,9 @@
   "n_updates": 5e3,
   "network_config": {
     "n_hidden_layers": 3,
-    "n_in_channels": 2,
+    "n_in_channels": 3,
     "n_kernels": 32,
-    "kernel_size": 7
+    "kernel_size": 3
   },
   "debug": true
 }
