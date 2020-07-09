@@ -46,22 +46,23 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
 
 
 def padding_collate_fn(batch_as_list: list):
-    target_size = 100
+    # target_size = 100
+    # get the minimum bounds in from list of input image shapes
+    target_size_x = np.max([t[0][0].shape[0] for t in batch_as_list])
+    target_size_y = np.max([t[0][0].shape[1] for t in batch_as_list])
+    # for targets and ids, just use list of 2nd and 3rd element in tuple of each list element
+    targets = [t[1] for t in batch_as_list]
+    ids = [t[2] for t in batch_as_list]
     inputs = []
-    targets = []
-    ids = []
-    for input_tensor, target_aray, idx in batch_as_list:
-        pad_x_left = (target_size - input_tensor[0].shape[0]) // 2
-        pad_x_right = target_size - input_tensor[0].shape[0] - pad_x_left
-        pad_y_bottom = (target_size - input_tensor[0].shape[1]) // 2
-        pad_y_top = target_size - input_tensor[0].shape[1] - pad_y_bottom
+    for input_tensor, target_array, idx in batch_as_list:
+        actual_size = input_tensor[0].shape
+        pad_x_left = (target_size_x - actual_size[0]) // 2
+        pad_x_right = target_size_x - actual_size[0] - pad_x_left
+        pad_y_bottom = (target_size_y - actual_size[1]) // 2
+        pad_y_top = target_size_y - actual_size[1] - pad_y_bottom
         new_input = torch.nn.functional.pad(input_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
                                             mode='constant', value=0)
-        # new_targets = torch.nn.functional.pad(target_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
-        #                                       mode='constant', value=0)
         inputs.append(new_input)
-        targets.append(target_aray)
-        ids.append(torch.tensor(idx, dtype=torch.int32))
 
     inputs = torch.stack(inputs, dim=0)
     # targets = torch.stack(targets, dim=0)
@@ -69,7 +70,7 @@ def padding_collate_fn(batch_as_list: list):
     return inputs, targets, ids
 
 
-def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_decay: float = 1e-5,
+def main(results_path, network_config: dict, eval_settings: dict, learning_rate: int = 1e-3, weight_decay: float = 1e-5,
          n_updates: int = int(1e5), device: torch.device = torch.device("cuda:0"), debug=False):
     """Main function that takes hyperparameters and performs training and evaluation of model"""
     # Prepare a path to plot to
@@ -114,11 +115,11 @@ def main(results_path, network_config: dict, learningrate: int = 1e-3, weight_de
     mse = torch.nn.MSELoss()
 
     # Get adam optimizer
-    optimizer = torch.optim.Adam(net.parameters(), lr=learningrate, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    print_stats_at = 1e1 if debug else 1e2  # print status to tensorboard every x updates
-    plot_at = 1e3 if debug else 1e4  # plot every x updates
-    validate_at = 5e1 if debug else 5e3  # evaluate model on validation set and check for new best model every x updates
+    print_stats_at = eval_settings['print_stats_at']  # print status to tensorboard every x updates
+    plot_at = eval_settings['plot_at']  # plot every x updates
+    validate_at = eval_settings['validate_at']  # test on validation set and check for new best model every x updates
     update = 0  # current update counter
     best_validation_loss = np.inf  # best validation loss so far
     update_progess_bar = tqdm.tqdm(total=n_updates, desc=f"loss: {np.nan:7.5f}", position=0)  # progressbar

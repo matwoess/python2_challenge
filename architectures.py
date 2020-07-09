@@ -32,7 +32,7 @@ class DeCropCNN(torch.nn.Module):
 
         cnn_out = self.hidden_layers(x)  # apply hidden layers (N, n_in_channels, X, Y) -> (N, n_kernels, X, Y)
         pred = self.output_layer(cnn_out)  # apply output layer (N, n_kernels, X, Y) -> (N, 1, X, Y)
-
+        # remove second dimension (N, 1, X, Y) -> (N, X, Y)
         pred = torch.reshape(pred, (pred.shape[0], pred.shape[2], pred.shape[3]))
         # Use boolean mask as indices for each sample:
         predictions = [pred[i, target_masks[i]] for i in range(len(pred))]

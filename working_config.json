@@ -1,13 +1,18 @@
 {
   "results_path": "results",
   "device": "cpu",
-  "learningrate": 1e-3,
+  "learning_rate": 1e-3,
   "weight_decay": 1e-5,
-  "n_updates": 5e4,
+  "n_updates": 5e3,
   "network_config": {
     "n_hidden_layers": 4,
     "n_in_channels": 3,
     "n_kernels": 32,
     "kernel_size": 7
+  },
+  "eval_settings": {
+    "print_stats_at": 1e2,
+    "plot_at": 1e4,
+    "validate_at": 5e3
   }
 }
