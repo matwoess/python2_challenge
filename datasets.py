@@ -59,7 +59,7 @@ def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: 
         return image_array, target_array
 
 
-def create_dataset(data_folder: str, dataset_file: str, targets_file: str = 'targets.pkl'):
+def create_dataset(data_folder: str, dataset_file: str, targets_file: str = os.path.join('data', 'targets.pkl')):
     files = sorted(glob.glob(os.path.join(data_folder, '**/*.jpg'), recursive=True))
     images = []
     crop_sizes = []
@@ -149,7 +149,7 @@ class AugmentedDataset(Dataset):
 
 
 class TrainingDataset(Dataset):
-    def __init__(self, dataset: Dataset, targets_file: str = 'targets.pkl'):
+    def __init__(self, dataset: Dataset, targets_file: str = os.path.join('data', 'targets.pkl')):
         """Provides images from 'dataset' as inputs and images cropped as targets"""
         self.dataset = dataset
         with open(targets_file, 'rb') as f:
