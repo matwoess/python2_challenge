@@ -9,7 +9,10 @@ import os
 import numpy as np
 import torch
 import torch.utils.data
-from datasets import GreyscaleDataset, CroppedImages
+
+import scoring
+import utils
+from datasets import CropDataset, AugmentedDataset, TrainingDataset
 from utils import plot
 from architectures import DeCropCNN
 import torchvision.transforms as transforms
@@ -17,9 +20,19 @@ import torchvision.transforms as transforms
 import tensorboard
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
+import dill as pkl
 
 
-def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device):
+def mse_fn(target_array, prediction_array):
+    if prediction_array.shape != target_array.shape:
+        raise IndexError(f"Target shape is {target_array.shape} but prediction shape is {prediction_array.shape}")
+    prediction_array, target_array = np.asarray(prediction_array, np.float64), np.asarray(target_array, np.float64)
+    return np.mean((prediction_array - target_array) ** 2)
+
+
+def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device,
+                   predictions_file: str = os.path.join('results', 'eval_predictions.pkl'),
+                   targets_file: str = os.path.join('results', 'eval_targets.pkl')):
     """Function for evaluation of a model `model` on the data in `dataloader` on device `device`"""
     # Define a loss (mse loss)
     mse = torch.nn.MSELoss()
@@ -27,21 +40,29 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
     loss = torch.tensor(0., device=device)
     with torch.no_grad():  # We do not need gradients for evaluation
         # Loop over all samples in `dataloader`
+        target_list = []
+        prediction_list = []
         for data in tqdm.tqdm(dataloader, desc="scoring", position=0):
             # Get a sample and move inputs and targets to device
-            inputs, targets, file_names = data
+            inputs, _, means, stds, targets, ids = data
             inputs = inputs.to(device)
             # targets = targets.to(device)
-
             # Get outputs for network
             predictions = model(inputs)
-
+            predictions = utils.de_normalize(predictions, means, stds, reshape=[t.shape for t in targets])
+            targets = utils.de_normalize(targets, means, stds)
+            prediction_list.append(*predictions)
+            target_list.append(*targets)
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
-
             # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
-            loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
-                                  for output, target in zip(predictions, targets)]).sum()
-                     / len(dataloader.dataset))
+            # loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
+            #                       for output, target in zip(predictions, targets)]).sum()
+            #          / len(dataloader.dataset))
+        with open(predictions_file, 'wb') as f:
+            pkl.dump(prediction_list, f)
+        with open(targets_file, 'wb') as f:
+            pkl.dump(target_list, f)
+        loss = scoring.scoring(predictions_file, targets_file)
     return loss
 
 
@@ -51,10 +72,14 @@ def padding_collate_fn(batch_as_list: list):
     target_size_x = np.max([t[0][0].shape[0] for t in batch_as_list])
     target_size_y = np.max([t[0][0].shape[1] for t in batch_as_list])
     # for targets and ids, just use list of 2nd and 3rd element in tuple of each list element
-    targets = [t[1] for t in batch_as_list]
-    ids = [t[2] for t in batch_as_list]
+    input_tensors = [t[0] for t in batch_as_list]
+    crop_sizes = [t[1] for t in batch_as_list]
+    means = [t[2] for t in batch_as_list]
+    stds = [t[3] for t in batch_as_list]
+    targets = [t[4] for t in batch_as_list]
+    ids = [t[5] for t in batch_as_list]
     inputs = []
-    for input_tensor, target_array, idx in batch_as_list:
+    for input_tensor in input_tensors:
         actual_size = input_tensor[0].shape
         pad_x_left = (target_size_x - actual_size[0]) // 2
         pad_x_right = target_size_x - actual_size[0] - pad_x_left
@@ -65,44 +90,37 @@ def padding_collate_fn(batch_as_list: list):
         inputs.append(new_input)
 
     inputs = torch.stack(inputs, dim=0)
-    # targets = torch.stack(targets, dim=0)
-    # ids = torch.stack(ids, dim=0)
-    return inputs, targets, ids
+    return inputs, crop_sizes, means, stds, targets, ids
 
 
-def main(results_path, network_config: dict, eval_settings: dict, learning_rate: int = 1e-3, weight_decay: float = 1e-5,
-         n_updates: int = int(1e5), device: torch.device = torch.device("cuda:0"), debug=False):
+def main(results_path, network_config: dict, eval_settings: dict, learning_rate: int = 1e-3,
+         weight_decay: float = 1e-5, n_updates: int = int(1e5), device: torch.device = torch.device("cuda:0")):
     """Main function that takes hyperparameters and performs training and evaluation of model"""
     # Prepare a path to plot to
     plotpath = os.path.join(results_path, 'plots')
     os.makedirs(plotpath, exist_ok=True)
 
     # Load or create the dataset
-    greyscale_dataset = GreyscaleDataset(data_folder='data')
+    greyscale_dataset = CropDataset(data_folder='data/user_images')
+    augmented_dataset = AugmentedDataset(greyscale_dataset)
 
     # Split dataset into training, validation, and test set randomly
-    trainingset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (3 / 5))))
-    validationset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (3 / 5)),
-                                                                                 int(len(greyscale_dataset) * (4 / 5))))
-    testset = torch.utils.data.Subset(greyscale_dataset, indices=np.arange(int(len(greyscale_dataset) * (4 / 5)),
-                                                                           len(greyscale_dataset)))
+    trainingset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (3 / 5))))
+    validationset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (3 / 5)),
+                                                                                 int(len(augmented_dataset) * (4 / 5))))
+    testset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
+                                                                           len(augmented_dataset)))
 
     # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
-    trainingset_eval = CroppedImages(dataset=trainingset, debug=debug)
-    validationset = CroppedImages(dataset=validationset, debug=debug)
-    testset = CroppedImages(dataset=testset, debug=debug)
-    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=1, shuffle=False, num_workers=0,
-                                              collate_fn=padding_collate_fn)
-    valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False, num_workers=0,
-                                            collate_fn=padding_collate_fn)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=0,
-                                             collate_fn=padding_collate_fn)
-
-    # Create datasets and dataloaders with rotated targets with augmentation (for training)
-    chain = transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip()])
-    trainingset_augmented = CroppedImages(dataset=trainingset, transform_chain=chain)
-    trainloader_augmented = torch.utils.data.DataLoader(trainingset_augmented, batch_size=16, shuffle=True,
-                                                        num_workers=0, collate_fn=padding_collate_fn)
+    trainingset_eval = TrainingDataset(dataset=trainingset)
+    validationset = TrainingDataset(dataset=validationset)
+    testset = TrainingDataset(dataset=testset)
+    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=16, shuffle=False,
+                                              num_workers=0, collate_fn=padding_collate_fn)
+    valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False,
+                                            num_workers=0, collate_fn=padding_collate_fn)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=1, shuffle=False,
+                                             num_workers=0, collate_fn=padding_collate_fn)
 
     # Define a tensorboard summary writer that writes to directory "results_path/tensorboard"
     writer = SummaryWriter(log_dir=os.path.join(results_path, 'tensorboard'))
@@ -129,20 +147,15 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
 
     # Train until n_updates update have been reached
     while update < n_updates:
-        for data in trainloader_augmented:
-            # Get next samples in `trainloader_augmented`
-            inputs, targets, ids = data
+        for data in trainloader:
+            # Get next samples in `trainloader`
+            inputs, crop_sizes, means, stds, targets, ids = data
             inputs = inputs.to(device)
-            # crop_arrays = inputs[:, 1, ...]
-            # target_masks = crop_arrays.to(dtype=torch.bool)
             # Reset gradients
             optimizer.zero_grad()
-
             # Get outputs for network
-            predictions = net(inputs)
-
+            predictions = net(inputs)  # (N, X*Y)
             # Calculate loss, do backward pass, and update weights
-            # loss = mse(outputs, targets)
             loss = torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
                                 for output, target in zip(predictions, targets)])
             loss = loss.mean()
@@ -155,12 +168,12 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
 
             # Plot output
             if update % plot_at == 0:
-                plot(inputs.detach().cpu().numpy(), targets, predictions, plotpath, update)
+                plot(inputs.detach().numpy(), targets, predictions, means, stds, plotpath, update)
 
             # Evaluate model on validation set
             if update % validate_at == 0 and update > 0:
                 val_loss = evaluate_model(net, dataloader=valloader, device=device)
-                writer.add_scalar(tag="validation/loss", scalar_value=val_loss.cpu(), global_step=update)
+                writer.add_scalar(tag="validation/loss", scalar_value=val_loss, global_step=update)
                 # Add weights as arrays to tensorboard
                 for i, param in enumerate(net.parameters()):
                     writer.add_histogram(tag=f'validation/param_{i}', values=param.cpu(), global_step=update)
