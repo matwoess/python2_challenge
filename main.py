@@ -51,8 +51,8 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
             predictions = model(inputs)
             predictions = utils.de_normalize(predictions, means, stds, reshape=[t.shape for t in targets])
             targets = utils.de_normalize(targets, means, stds)
-            prediction_list.append(*predictions)
-            target_list.append(*targets)
+            prediction_list.extend(predictions)
+            target_list.extend(targets)
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
             # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
             # loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))

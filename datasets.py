@@ -67,15 +67,20 @@ def create_dataset(data_folder: str, dataset_file: str, targets_file: str = os.p
     targets = []
     for image in tqdm(files, desc='creating dataset', total=len(files)):
         img = Image.open(image)
-        # TODO: quadruple dataset by vertical and horizontal flipping
-        x, y, w, h, cx, cy = get_random_image_values()
-        img = img.resize((y, x), Image.LANCZOS)  # mind thee: x and y swapped
-        arr = np.array(img, dtype=np.float32)
-        arr, target_array = create_cropped_data(np.copy(arr), (w, h), (cx, cy), crop_only=False)
-        images.append(arr)
-        crop_sizes.append((w, h))
-        crop_centers.append((cx, cy))
-        targets.append(target_array)
+        # quadruple dataset by vertical and horizontal flipping
+        for i in range(4):
+            if i == 1 or i == 3:
+                img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            if i == 2:
+                img = img.transpose(Image.FLIP_TOP_BOTTOM)
+            x, y, w, h, cx, cy = get_random_image_values()
+            resized = img.resize((y, x), Image.LANCZOS)  # mind thee: x and y swapped
+            arr = np.array(resized, dtype=np.float32)
+            arr, target_array = create_cropped_data(np.copy(arr), (w, h), (cx, cy), crop_only=False)
+            images.append(arr)
+            crop_sizes.append((w, h))
+            crop_centers.append((cx, cy))
+            targets.append(target_array)
     data = {'images': images, 'crop_sizes': crop_sizes, 'crop_centers': crop_centers}
     # safe for next iteration
     with open(dataset_file, 'wb') as f:
@@ -118,6 +123,7 @@ class AugmentedDataset(Dataset):
     def __getitem__(self, idx):
         image_data, crop_size, crop_center, idx = self.dataset.__getitem__(idx)
         crop_array = create_cropped_data(image_data, crop_size, crop_center, crop_only=True)
+        image_data = image_data.astype(np.float32)
         mean = image_data.mean()
         std = image_data.std()
         image_data[:] -= mean
@@ -162,6 +168,7 @@ class TrainingDataset(Dataset):
     def __getitem__(self, idx):
         full_inputs, crop_size, mean, std, idx = self.dataset.__getitem__(idx)
         target = self.targets[idx]
+        target = target.astype(np.float32)
         target[:] -= mean
         target[:] /= std
         return full_inputs, crop_size, mean, std, target, idx
