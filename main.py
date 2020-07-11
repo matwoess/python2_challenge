@@ -34,10 +34,6 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
                    predictions_file: str = os.path.join('results', 'eval_predictions.pkl'),
                    targets_file: str = os.path.join('results', 'eval_targets.pkl')):
     """Function for evaluation of a model `model` on the data in `dataloader` on device `device`"""
-    # Define a loss (mse loss)
-    mse = torch.nn.MSELoss()
-    # We will accumulate the mean loss in variable `loss`
-    loss = torch.tensor(0., device=device)
     with torch.no_grad():  # We do not need gradients for evaluation
         # Loop over all samples in `dataloader`
         target_list = []
@@ -54,10 +50,6 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
             prediction_list.extend(predictions)
             target_list.extend(targets)
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
-            # Calculate mean mse loss over all samples in dataloader (accumulate mean losses in `loss`)
-            # loss += (torch.stack([mse(output, torch.tensor(target.reshape((-1,))))
-            #                       for output, target in zip(predictions, targets)]).sum()
-            #          / len(dataloader.dataset))
         with open(predictions_file, 'wb') as f:
             pkl.dump(prediction_list, f)
         with open(targets_file, 'wb') as f:
@@ -67,7 +59,6 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
 
 
 def padding_collate_fn(batch_as_list: list):
-    # target_size = 100
     # get the minimum bounds in from list of input image shapes
     target_size_x = np.max([t[0][0].shape[0] for t in batch_as_list])
     target_size_y = np.max([t[0][0].shape[1] for t in batch_as_list])
@@ -101,21 +92,27 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
     os.makedirs(plotpath, exist_ok=True)
 
     # Load or create the dataset
-    greyscale_dataset = CropDataset(data_folder='data/user_images')
+    greyscale_dataset = CropDataset()
     augmented_dataset = AugmentedDataset(greyscale_dataset)
+    # load test datset as provided
+    test_dataset = CropDataset(
+        dataset_file=os.path.join('data', 'provided_sets', 'example_with_known_testset', 'example_testset.pkl'))
+    augmented_test_dataset = AugmentedDataset(test_dataset)
 
-    # Split dataset into training, validation, and test set randomly
-    trainingset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (3 / 5))))
-    validationset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (3 / 5)),
-                                                                                 int(len(augmented_dataset) * (4 / 5))))
-    testset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
-                                                                           len(augmented_dataset)))
+    # Split out dataset into training and validationset randomly
+    trainingset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5))))
+    validationset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
+                                                                                 int(len(augmented_dataset))))
+    # testset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
+    #                                                                       len(augmented_dataset)))
 
     # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
     trainingset_eval = TrainingDataset(dataset=trainingset)
     validationset = TrainingDataset(dataset=validationset)
-    testset = TrainingDataset(dataset=testset)
-    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=16, shuffle=False,
+    testset = TrainingDataset(dataset=augmented_test_dataset,
+                              targets_file=os.path.join('data', 'provided_sets', 'example_with_known_testset',
+                                                        'example_targets.pkl'))
+    trainloader = torch.utils.data.DataLoader(trainingset_eval, batch_size=16, shuffle=True,
                                               num_workers=0, collate_fn=padding_collate_fn)
     valloader = torch.utils.data.DataLoader(validationset, batch_size=1, shuffle=False,
                                             num_workers=0, collate_fn=padding_collate_fn)
