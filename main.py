@@ -40,12 +40,12 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
         prediction_list = []
         for data in tqdm.tqdm(dataloader, desc="scoring", position=0):
             # Get a sample and move inputs and targets to device
-            inputs, _, means, stds, targets, ids = data
+            inputs, crop_sizes, means, stds, targets, ids = data
             inputs = inputs.to(device)
             # targets = targets.to(device)
             # Get outputs for network
             predictions = model(inputs)
-            predictions = utils.de_normalize(predictions, means, stds, reshape=[t.shape for t in targets])
+            predictions = utils.de_normalize(predictions, means, stds, reshape=[s for s in crop_sizes])
             targets = utils.de_normalize(targets, means, stds)
             prediction_list.extend(predictions)
             target_list.extend(targets)

@@ -12,7 +12,7 @@
   },
   "eval_settings": {
     "print_stats_at": 1e2,
-    "plot_at": 1e4,
-    "validate_at": 5e3
+    "plot_at": 1e3,
+    "validate_at": 5e2
   }
 }
