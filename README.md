@@ -1,39 +1,43 @@
-# Example ML project
-This project is an example ML project and contains a simple CNN 
-that is trained to rotate an input image.
-The input images used are CIFAR10 images, which have been converted to grayscale and
-are rotated to obtain the targets.
+# Python II challenge
+This project predicts missing parts in an image using a simple CNN.  
+It is based on the sample project provided by `Michael Widrich`, but heavily modified.  
+The input dataset was created from thousands of user images
+submitted in the first exercise of the semester (not included),
+but can create a new dataset from any kind of greyscale images.
 
-In this first section you would put general information on the project, references, and
- an author list, if applicable.
 
-### Example usage
-It helps, especially for people new to ML, to include various example usage scenarios and
- an installation guide of your project, if applicable.
-
-In our case the simple usage is:
+### Usage
+Simply call the main function with any configuration json file:
 ```
-python3 main.py working_config.json
+python3 main.py <config>.json
 ```
+
+`debug_config.json` trains less, print more stats and plots more often.  
+For the final predictions `working_config.json` was used.
 
 ### Structure
-Having a tree with the files and folders is nice to get an overview.
-However, this is sometimes tedious to maintain and omitted.
 ```
-example_project
+python2_challenge
 |- architectures.py
 |    Classes and functions for network architectures
 |- datasets.py
 |    Dataset classes and dataset helper functions
+|- debug_config.json
+|    A modified copy of the working_config with smaller parameter values for debugging
 |- main.py
-|    Main file. In this case also includes training and evaluation routines.
+|    Main file
+|    Also includes training and evaluation routines
 |- README.md
-|    A readme file containing info on project, example usage, authors, publication references, and dependencies.
+|    This description
 |- utils.py
-|    Utility functions and classes. In this case contains a plotting function.
+|    Utility functions and classes
+|    In this case contains a plotting function and a de-normalization function
 |- working_config.json
-|     An example configuration file. Can also be done via command line arguments to main.py.
+|    The configuration file used to train the model and make final predictions
 ```
 
-### Dependencies
-Dependencies are usually given as a list of packages + version numbers or as conda environments.
+### Visualization example
+After about 5000 training iterations (with batch-size 16) the plotted output
+might look something like this:
+
+![example picture](./example.png)
