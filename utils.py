@@ -11,11 +11,12 @@ from typing import List
 import numpy as np
 
 
-def de_normalize(data: np.ndarray, means: list, stds: list, reshape: list = None) -> List[np.ndarray]:
+def de_normalize(data, means: list, stds: list, reshape: list = None) -> List[np.ndarray]:
+    """De-normalize a list of data according to a list of means and stds, optionally reshape input first"""
     # (N, n_channels, X, Y) -- normalized
     input_list = []
     for i, sample in enumerate(data):  # (n_channels, X, Y)
-        if reshape:
+        if reshape:  # tensor(n_channels, X*Y) ->  (n_channels, X, Y)
             sample = sample.detach().numpy().reshape(reshape[i])
         # (X, Y)
         sample *= stds[i]
@@ -26,7 +27,7 @@ def de_normalize(data: np.ndarray, means: list, stds: list, reshape: list = None
 
 
 def plot(inputs, targets, predictions, means, stds, path, update):
-    """Plotting the inputs, targets, and predictions to file `path`"""
+    """Plotting the inputs, targets, predictions and their difference to file `path`"""
     os.makedirs(path, exist_ok=True)
     fig, ax = plt.subplots(2, 2)
     plot_inputs = de_normalize(inputs[:, 0, ...], means, stds)

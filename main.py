@@ -15,19 +15,9 @@ import utils
 from datasets import CropDataset, AugmentedDataset, TrainingDataset
 from utils import plot
 from architectures import DeCropCNN
-import torchvision.transforms as transforms
-# TODO: requirements.txt
-import tensorboard
 from torch.utils.tensorboard import SummaryWriter
 import tqdm
 import dill as pkl
-
-
-def mse_fn(target_array, prediction_array):
-    if prediction_array.shape != target_array.shape:
-        raise IndexError(f"Target shape is {target_array.shape} but prediction shape is {prediction_array.shape}")
-    prediction_array, target_array = np.asarray(prediction_array, np.float64), np.asarray(target_array, np.float64)
-    return np.mean((prediction_array - target_array) ** 2)
 
 
 def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device,
@@ -39,17 +29,18 @@ def evaluate_model(model: torch.nn.Module, dataloader: torch.utils.data.DataLoad
         target_list = []
         prediction_list = []
         for data in tqdm.tqdm(dataloader, desc="scoring", position=0):
-            # Get a sample and move inputs and targets to device
+            # Get a sample and move inputs to device
             inputs, crop_sizes, means, stds, targets, ids = data
             inputs = inputs.to(device)
-            # targets = targets.to(device)
             # Get outputs for network
             predictions = model(inputs)
+            # de-normalize predictions and targets with their initial mean and std
             predictions = utils.de_normalize(predictions, means, stds, reshape=[s for s in crop_sizes])
             targets = utils.de_normalize(targets, means, stds)
             prediction_list.extend(predictions)
             target_list.extend(targets)
             # Here we could clamp the outputs to the minimum and maximum values of inputs for better performance
+        # store targets and prediction in pickle files for using baseline scoring
         with open(predictions_file, 'wb') as f:
             pkl.dump(prediction_list, f)
         with open(targets_file, 'wb') as f:
@@ -62,13 +53,14 @@ def padding_collate_fn(batch_as_list: list):
     # get the minimum bounds in from list of input image shapes
     target_size_x = np.max([t[0][0].shape[0] for t in batch_as_list])
     target_size_y = np.max([t[0][0].shape[1] for t in batch_as_list])
-    # for targets and ids, just use list of 2nd and 3rd element in tuple of each list element
+    # extract values from list
     input_tensors = [t[0] for t in batch_as_list]
     crop_sizes = [t[1] for t in batch_as_list]
     means = [t[2] for t in batch_as_list]
     stds = [t[3] for t in batch_as_list]
     targets = [t[4] for t in batch_as_list]
     ids = [t[5] for t in batch_as_list]
+    # pad inputs to minimum bounds
     inputs = []
     for input_tensor in input_tensors:
         actual_size = input_tensor[0].shape
@@ -79,9 +71,35 @@ def padding_collate_fn(batch_as_list: list):
         new_input = torch.nn.functional.pad(input_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
                                             mode='constant', value=0)
         inputs.append(new_input)
-
+    # stack inputs
     inputs = torch.stack(inputs, dim=0)
     return inputs, crop_sizes, means, stds, targets, ids
+
+
+def padding_collate_fn_no_targets(batch_as_list: list):
+    # get the minimum bounds in from list of input image shapes
+    target_size_x = np.max([t[0][0].shape[0] for t in batch_as_list])
+    target_size_y = np.max([t[0][0].shape[1] for t in batch_as_list])
+    # extract values from list
+    input_tensors = [t[0] for t in batch_as_list]
+    crop_sizes = [t[1] for t in batch_as_list]
+    means = [t[2] for t in batch_as_list]
+    stds = [t[3] for t in batch_as_list]
+    ids = [t[4] for t in batch_as_list]
+    # pad inputs to minimum bounds
+    inputs = []
+    for input_tensor in input_tensors:
+        actual_size = input_tensor[0].shape
+        pad_x_left = (target_size_x - actual_size[0]) // 2
+        pad_x_right = target_size_x - actual_size[0] - pad_x_left
+        pad_y_bottom = (target_size_y - actual_size[1]) // 2
+        pad_y_top = target_size_y - actual_size[1] - pad_y_bottom
+        new_input = torch.nn.functional.pad(input_tensor, pad=[pad_y_bottom, pad_y_top, pad_x_left, pad_x_right],
+                                            mode='constant', value=0)
+        inputs.append(new_input)
+    # stack inputs
+    inputs = torch.stack(inputs, dim=0)
+    return inputs, crop_sizes, means, stds, ids
 
 
 def main(results_path, network_config: dict, eval_settings: dict, learning_rate: int = 1e-3,
@@ -99,14 +117,14 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
         dataset_file=os.path.join('data', 'provided_sets', 'example_with_known_testset', 'example_testset.pkl'))
     augmented_test_dataset = AugmentedDataset(test_dataset)
 
-    # Split out dataset into training and validationset randomly
+    # Split out dataset into training and validationset
     trainingset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5))))
     validationset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
                                                                                  int(len(augmented_dataset))))
     # testset = torch.utils.data.Subset(augmented_dataset, indices=np.arange(int(len(augmented_dataset) * (4 / 5)),
     #                                                                       len(augmented_dataset)))
 
-    # Create datasets and dataloaders with rotated targets without augmentation (for evaluation)
+    # Create datasets and dataloaders
     trainingset_eval = TrainingDataset(dataset=trainingset)
     validationset = TrainingDataset(dataset=validationset)
     testset = TrainingDataset(dataset=augmented_test_dataset,
@@ -125,10 +143,8 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
     # Create Network
     net = DeCropCNN(**network_config)
     net.to(device)
-
     # Get mse loss function
     mse = torch.nn.MSELoss()
-
     # Get adam optimizer
     optimizer = torch.optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
@@ -143,7 +159,7 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
     torch.save(net, os.path.join(results_path, 'best_model.pt'))
 
     # Train until n_updates update have been reached
-    while update < n_updates:
+    while update <= n_updates:
         for data in trainloader:
             # Get next samples in `trainloader`
             inputs, crop_sizes, means, stds, targets, ids = data
@@ -180,6 +196,7 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
                 # Save best model for early stopping
                 if best_validation_loss > val_loss:
                     best_validation_loss = val_loss
+                    print('saving as new best_model.pt')
                     torch.save(net, os.path.join(results_path, 'best_model.pt'))
 
             update_progess_bar.set_description(f"loss: {loss:7.5f}", refresh=True)
@@ -211,6 +228,32 @@ def main(results_path, network_config: dict, eval_settings: dict, learning_rate:
         print(f"test loss: {test_loss}", file=fh)
         print(f"validation loss: {val_loss}", file=fh)
         print(f"training loss: {train_loss}", file=fh)
+
+    # create submission predictions
+    submission_dataset = CropDataset(dataset_file=os.path.join('data', 'provided_sets', 'challenge_testset.pkl'))
+    augmented_submission_dataset = AugmentedDataset(submission_dataset)
+    submission_loader = torch.utils.data.DataLoader(augmented_submission_dataset, batch_size=1, shuffle=False,
+                                                    num_workers=0, collate_fn=padding_collate_fn_no_targets)
+    create_submission(net, submission_loader, device)
+
+
+def create_submission(model: torch.nn.Module, dataloader: torch.utils.data.DataLoader, device: torch.device,
+                      submission: str = os.path.join('results', 'submission.pkl')):
+    """Function for creating submission results as a pickle file"""
+    with torch.no_grad():  # We do not need gradients for evaluation
+        # Loop over all samples in `dataloader`
+        submission_list = []
+        for data in tqdm.tqdm(dataloader, desc="scoring", position=0):
+            # Get a sample and move inputs and targets to device
+            inputs, crop_sizes, means, stds, ids = data
+            inputs = inputs.to(device)
+            # Get outputs for network
+            predictions = model(inputs)
+            predictions = utils.de_normalize(predictions, means, stds, reshape=[s for s in crop_sizes])
+            submission_list.extend(predictions)
+        # dump results
+        with open(submission, 'wb') as f:
+            pkl.dump(submission_list, f)
 
 
 if __name__ == '__main__':

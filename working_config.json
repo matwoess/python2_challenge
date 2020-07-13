@@ -2,8 +2,8 @@
   "results_path": "results",
   "device": "cpu",
   "learning_rate": 1e-3,
-  "weight_decay": 1e-5,
-  "n_updates": 5e3,
+  "weight_decay": 1e-4,
+  "n_updates": 6e3,
   "network_config": {
     "n_hidden_layers": 3,
     "n_in_channels": 3,

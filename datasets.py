@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 
 def get_random_image_values():
+    """provides random sizes, crop_sizes and crop_centers for creating the dataset"""
     border = 20
     rand_x = random.randrange(70, 100)  # maximum pixel index = 99
     rand_y = random.randrange(70, 100)  # maximum pixel index = 99
@@ -28,6 +29,7 @@ def get_random_image_values():
 
 
 def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: tuple, crop_only: bool = True):
+    """create crop_array, or image and target array, depending on parameter`crop_only`"""
     if not crop_only:
         # check parameters
         if not isinstance(image_array, np.ndarray) or len(image_array.shape) != 2:
@@ -60,6 +62,8 @@ def create_cropped_data(image_array: np.ndarray, crop_size: tuple, crop_center: 
 
 
 def create_dataset(data_folder: str, dataset_file: str, targets_file: str = os.path.join('data', 'targets.pkl')):
+    """create a dataset and targets from all images in `data_folder`
+    and store them in `dataset_file` and `targets_file`"""
     files = sorted(glob.glob(os.path.join(data_folder, '**/*.jpg'), recursive=True))
     images = []
     crop_sizes = []
@@ -82,7 +86,7 @@ def create_dataset(data_folder: str, dataset_file: str, targets_file: str = os.p
             crop_centers.append((cx, cy))
             targets.append(target_array)
     data = {'images': images, 'crop_sizes': crop_sizes, 'crop_centers': crop_centers}
-    # safe for next iteration
+    # persist on harddrive
     with open(dataset_file, 'wb') as f:
         pickle.dump(data, f)
     with open(targets_file, 'wb') as f:
@@ -94,7 +98,7 @@ class CropDataset(Dataset):
     def __init__(self, data_folder: str = os.path.join('data', 'user_images'),
                  dataset_file: str = os.path.join('data', 'dataset.pkl'),
                  targets: str = os.path.join('data', 'dataset.pkl')):
-        """Grayscale image dataset as provided by the python II lecture"""
+        """Grayscale image dataset with cropped out rectangles"""
         # check for existing dataset
         if not os.path.exists(dataset_file):
             create_dataset(data_folder, dataset_file)
@@ -114,7 +118,7 @@ class CropDataset(Dataset):
 
 class AugmentedDataset(Dataset):
     def __init__(self, dataset: Dataset):
-        """Provides images from 'dataset' as inputs and images cropped as targets"""
+        """Provides additional information for GrayscaleDataset 'dataset' in input channel"""
         self.dataset = dataset
 
     def __len__(self):
@@ -123,12 +127,13 @@ class AugmentedDataset(Dataset):
     def __getitem__(self, idx):
         image_data, crop_size, crop_center, idx = self.dataset.__getitem__(idx)
         crop_array = create_cropped_data(image_data, crop_size, crop_center, crop_only=True)
-        image_data = image_data.astype(np.float32)
+        image_data = image_data.astype(np.float32)  # in case the source is f.e. uint8
+        # normalize image
         mean = image_data.mean()
         std = image_data.std()
         image_data[:] -= mean
         image_data[:] /= std
-        # Add information about relative position in image to inputs
+        # extend image by 2 dimensions
         full_inputs = np.zeros(shape=(*image_data.shape, 3), dtype=image_data.dtype)
         full_inputs[..., 0] = image_data
         # create a layer showing approximately how far away from the crop_center each pixel is
@@ -139,24 +144,26 @@ class AugmentedDataset(Dataset):
             np.linspace(-0.5 - x_offset, 0.5 - x_offset, num=image_data.shape[0], endpoint=True))
         closeness_array[:, ] += 0.5 - np.abs(
             np.linspace(-0.5 - y_offset, 0.5 - y_offset, num=image_data.shape[1], endpoint=True))
-        # scale layer to interval  [0, 1]
-        closeness_array -= np.min(closeness_array)
-        closeness_array /= np.max(closeness_array)
-        # crop out blank array
-
+        # remove crop array (make it more of an pixel-contribution-array)
+        closeness_array -= crop_array
+        # normalize closeness array
+        closeness_mean = closeness_array.mean()
+        closeness_std = closeness_array.std()
+        closeness_array -= closeness_mean
+        closeness_array /= closeness_std
+        # add additional input channels
         full_inputs[..., 1] = closeness_array
         full_inputs[..., 2] = crop_array
 
-        # Convert numpy arrays to tensors
+        # Convert numpy arrays to tensor
         full_inputs = TF.to_tensor(full_inputs)
-        # target_data = TF.to_tensor(target_array)
 
         return full_inputs, crop_size, mean, std, idx
 
 
 class TrainingDataset(Dataset):
     def __init__(self, dataset: Dataset, targets_file: str = os.path.join('data', 'targets.pkl')):
-        """Provides images from 'dataset' as inputs and images cropped as targets"""
+        """Provides same tuple of data as AugmentedDataset 'dataset' but adds (normalized) targets"""
         self.dataset = dataset
         with open(targets_file, 'rb') as f:
             target_data = pickle.load(f)
@@ -168,7 +175,7 @@ class TrainingDataset(Dataset):
     def __getitem__(self, idx):
         full_inputs, crop_size, mean, std, idx = self.dataset.__getitem__(idx)
         target = self.targets[idx]
-        target = target.astype(np.float32)
+        target = target.astype(np.float32)  # in case source is f.e. uint8
         target[:] -= mean
         target[:] /= std
         return full_inputs, crop_size, mean, std, target, idx
